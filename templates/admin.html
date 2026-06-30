@@ -1,0 +1,134 @@
+﻿{% extends 'base.html' %}
+{% block title %}Admin Panel | Tech Support App{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="row-center" style="justify-content: space-between; gap: 18px; flex-wrap: wrap;">
+        <div>
+            <p class="small-text">Admin control center</p>
+            <h1 class="section-title">Master Admin Panel</h1>
+        </div>
+        <span class="badge badge-paid">Admin</span>
+    </div>
+
+    <div class="section-card">
+        <div class="table-responsive">
+            <table class="table-list">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Client</th>
+                        <th>Issue</th>
+                        <th>Payment</th>
+                        <th>Remote Access</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for booking in bookings %}
+                        <tr>
+                            <td>#{{ booking.id }}</td>
+                            <td>
+                                <strong>{{ booking.name }}</strong><br>
+                                <span class="small-text">{{ booking.whatsapp }}</span><br>
+                                <span class="small-text">{{ booking.email }}</span><br>
+                                <span class="small-text">Slot: {{ booking.scheduled_time }}</span>
+                            </td>
+                            <td>
+                                <p style="margin: 0 0 10px 0;">{{ booking.description[:120] }}{% if booking.description|length > 120 %}...{% endif %}</p>
+                                {% if booking.screenshot_path %}
+                                    <a class="action-link action-link-muted" href="{{ url_for('uploaded_file', filename=booking.screenshot_path.split('\\')[-1].split('/')[-1]) }}" target="_blank">View Screenshot</a>
+                                {% else %}
+                                    <span class="small-text">No screenshot provided</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if booking.payment_status == 'Paid' %}
+                                    <span class="badge badge-paid">Paid</span>
+                                {% else %}
+                                    <span class="badge badge-pending">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if booking.payment_status == 'Paid' and booking.admin_remote_link %}
+                                    <div class="remote-access-block">
+                                        <a class="action-link connect-remote-button action-link-disabled" id="connect-btn-{{ booking.id }}"
+                                           data-scheduled-time="{{ booking.scheduled_time }}"
+                                           data-admin-link="{{ booking.admin_remote_link }}"
+                                           aria-disabled="true">Connect Remote PC</a>
+                                        <div class="small-text lock-info" id="lock-info-{{ booking.id }}">
+                                            Unlocks at {{ booking.scheduled_time.replace('T', ' ') }}
+                                        </div>
+                                    </div>
+                                {% elif booking.payment_status == 'Paid' %}
+                                    <span class="badge badge-pending">Waiting for link</span>
+                                {% else %}
+                                    <span class="badge badge-pending">Awaiting payment</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="5" style="padding: 28px 18px; text-align: center; color: #64748b;">No support requests available yet.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        function pad(value) {
+            return String(value).padStart(2, '0');
+        }
+
+        function formatCountdown(milliseconds) {
+            var totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+            var minutes = Math.floor(totalSeconds / 60);
+            var seconds = totalSeconds % 60;
+            return pad(minutes) + ':' + pad(seconds);
+        }
+
+        document.querySelectorAll('.connect-remote-button').forEach(function (button) {
+            var scheduledTime = button.dataset.scheduledTime;
+            var adminLink = button.dataset.adminLink;
+            var bookingId = button.id.replace('connect-btn-', '');
+            var lockInfo = document.getElementById('lock-info-' + bookingId);
+
+            function updateLockState() {
+                var slot = new Date(scheduledTime);
+                var now = new Date();
+                var delta = slot - now;
+
+                if (isNaN(slot.getTime())) {
+                    if (lockInfo) {
+                        lockInfo.textContent = 'Invalid slot time';
+                    }
+                    return;
+                }
+
+                if (delta > 0) {
+                    button.classList.add('action-link-disabled');
+                    button.removeAttribute('href');
+                    button.setAttribute('aria-disabled', 'true');
+                    if (lockInfo) {
+                        lockInfo.textContent = 'Connect unlocks in ' + formatCountdown(delta);
+                    }
+                } else {
+                    button.classList.remove('action-link-disabled');
+                    button.setAttribute('href', adminLink);
+                    button.removeAttribute('aria-disabled');
+                    if (lockInfo) {
+                        lockInfo.textContent = 'Ready to connect';
+                    }
+                }
+            }
+
+            updateLockState();
+            setInterval(updateLockState, 1000);
+        });
+    });
+</script>
+
+{% endblock %}

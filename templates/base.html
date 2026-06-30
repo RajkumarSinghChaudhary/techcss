@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Tech Support App{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="site-header">
+        <div class="site-brand">
+            <a href="{{ url_for('index') }}">Tech Support App</a>
+        </div>
+        <nav class="main-nav">
+            {% if current_user.is_authenticated %}
+                <span class="nav-label">Signed in as {{ current_user.email }}</span>
+                <a href="{{ url_for('index') }}">Dashboard</a>
+                {% if current_user.is_admin %}<a href="{{ url_for('admin_dashboard') }}">Admin</a>{% endif %}
+                <a class="button button-secondary" href="{{ url_for('logout') }}">Logout</a>
+            {% else %}
+                <a href="{{ url_for('login') }}">Login</a>
+                <a href="{{ url_for('register') }}">Register</a>
+            {% endif %}
+            <button id="theme-toggle" type="button" class="theme-toggle" aria-label="Toggle theme" aria-pressed="false">
+                <span class="theme-toggle-track">
+                    <span class="theme-toggle-thumb">
+                        <span class="theme-toggle-icon">☁️</span>
+                    </span>
+                </span>
+            </button>
+        </nav>
+    </header>
+
+    <main class="page-content">
+        <div class="flash-area">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category|lower }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+        <p>© {{ 2026 }} Tech Support App</p>
+    </footer>
+
+    <script>
+        var storedTheme = localStorage.getItem('techSupportTheme') || 'light';
+        var themeToggle = document.getElementById('theme-toggle');
+
+        function setToggleState(theme) {
+            if (!themeToggle) return;
+            var isDark = theme === 'dark';
+            themeToggle.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+            themeToggle.classList.toggle('toggle-checked', isDark);
+            var icon = themeToggle.querySelector('.theme-toggle-icon');
+            if (icon) {
+                icon.textContent = isDark ? '🌙' : '☁️';
+            }
+        }
+
+        function applyTheme(theme) {
+            document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+            document.documentElement.classList.toggle('theme-light', theme === 'light');
+            setToggleState(theme);
+        }
+
+        applyTheme(storedTheme);
+
+        if (themeToggle) {
+            themeToggle.addEventListener('click', function () {
+                var selected = document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark';
+                localStorage.setItem('techSupportTheme', selected);
+                applyTheme(selected);
+            });
+        }
+    </script>
+</body>
+</html>

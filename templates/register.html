@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Register | Tech Support App{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width: 520px; margin: 0 auto;">
+    <div class="section-title">Create Your Account</div>
+    <p class="small-text" style="margin-bottom: 24px;">Register to book support sessions and pay securely.</p>
+
+    <form method="POST" action="{{ url_for('register') }}">
+        <input type="hidden" name="next" value="{{ next or url_for('index') }}">
+        <div class="form-field">
+            <label for="name">Full Name</label>
+            <input id="name" type="text" name="name" required>
+        </div>
+
+        <div class="form-field">
+            <label for="whatsapp">WhatsApp Number</label>
+            <input id="whatsapp" type="tel" name="whatsapp" required>
+        </div>
+
+        <div class="form-field">
+            <label for="license_no">License Number</label>
+            <input id="license_no" type="text" name="license_no" required>
+        </div>
+
+        <div class="form-field">
+            <label for="email">Email Address</label>
+            <input id="email" type="email" name="email" required>
+        </div>
+
+        <div class="form-field">
+            <label for="password">Password</label>
+            <input id="password" type="password" name="password" required>
+        </div>
+
+        <button class="button button-primary" type="submit" style="width: 100%;">Sign Up</button>
+    </form>
+
+    <p class="small-text" style="margin-top: 18px;">Already have an account? <a href="{{ url_for('login', next=next) }}">Log in here</a></p>
+</section>
+{% endblock %}

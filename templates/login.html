@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Login | Tech Support App{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width: 520px; margin: 0 auto;">
+    <div class="section-title">Welcome Back</div>
+    <p class="small-text" style="margin-bottom: 24px;">Sign in to manage your support requests and complete payments.</p>
+
+    <form method="POST" action="{{ url_for('login') }}">
+        <input type="hidden" name="next" value="{{ next or url_for('index') }}">
+        <div class="form-field">
+            <label for="email">Email Address</label>
+            <input id="email" type="email" name="email" required>
+        </div>
+
+        <div class="form-field">
+            <label for="password">Password</label>
+            <input id="password" type="password" name="password" required>
+        </div>
+
+        <button class="button button-primary" type="submit" style="width: 100%;">Log In</button>
+    </form>
+
+    <p class="small-text" style="margin-top: 18px;">Don't have an account? <a href="{{ url_for('register', next=next) }}">Register here</a></p>
+</section>
+{% endblock %}

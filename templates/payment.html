@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Payment | Tech Support App{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width: 520px; margin: 0 auto; text-align: center;">
+    <div class="section-title">Checkout</div>
+    <p class="small-text" style="margin-bottom: 24px;">Complete your payment to confirm the session slot and generate remote support access.</p>
+
+    <div class="notice-card" style="margin-bottom: 24px;">
+        <strong>Amount:</strong> ₹500<br>
+        <strong>Order ID:</strong> {{ order.id }}
+    </div>
+
+    <button id="rzp-button1" class="button button-primary" style="width: 100%;">Continue to Pay</button>
+</section>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+    var options = {
+        key: "{{ key_id }}",
+        amount: "{{ order.amount }}",
+        currency: "INR",
+        name: "Tech Support App",
+        description: "Session Booking Fee",
+        order_id: "{{ order.id }}",
+        handler: function (response) {
+            fetch('{{ url_for('payment_success') }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    booking_id: "{{ booking_id }}",
+                    razorpay_payment_id: response.razorpay_payment_id
+                })
+            })
+            .then(res => res.json())
+            .then(function(data) {
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    alert('Payment completed, but redirect failed. Please refresh or contact support.');
+                }
+            });
+        },
+        theme: { color: '#3b82f6' }
+    };
+
+    var rzp1 = new Razorpay(options);
+    document.getElementById('rzp-button1').onclick = function(e) {
+        e.preventDefault();
+        rzp1.open();
+    };
+</script>
+{% endblock %}

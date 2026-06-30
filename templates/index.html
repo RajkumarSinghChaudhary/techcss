@@ -1,0 +1,221 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard | Tech Support App{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="row-center" style="justify-content: space-between; gap: 18px; flex-wrap: wrap;">
+        <div>
+            <p class="small-text">Welcome back,</p>
+            <h1 class="section-title">Your Support Dashboard</h1>
+        </div>
+        <button class="button button-primary" onclick="openModal()">+ Book New Session</button>
+    </div>
+
+    <div class="section-card">
+        <div class="table-responsive">
+            <table class="table-list">
+                <thead>
+                    <tr>
+                        <th>Ticket</th>
+                        <th>Scheduled Slot</th>
+                        <th>Issue</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if bookings %}
+                        {% for booking in bookings %}
+                            <tr>
+                                <td>#{{ booking.id }}</td>
+                                <td>{{ booking.scheduled_time }}</td>
+                                <td>{{ booking.description[:70] }}{% if booking.description|length > 70 %}...{% endif %}</td>
+                                <td>
+                                    {% if booking.payment_status == 'Paid' %}
+                                        <span class="badge badge-paid">Paid</span>
+                                    {% else %}
+                                        <span class="badge badge-pending">Pending Payment</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if booking.payment_status == 'Paid' %}
+                                        <a class="action-link" href="{{ url_for('success', booking_id=booking.id) }}">View Remote Link</a>
+                                    {% else %}
+                                        <a class="action-link" href="{{ url_for('checkout', booking_id=booking.id) }}">Pay & Confirm</a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="5" style="padding: 28px 18px; text-align: center; color: #64748b;">No support tickets found yet. Book a new session to get started.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<div class="modal" id="bookingModal" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="bookingTitle">
+        <div class="modal-header">
+            <div>
+                <h2 id="bookingTitle">Book a Support Session</h2>
+                <p class="small-text">Select your preferred slot and upload a screenshot for faster help.</p>
+            </div>
+            <button class="modal-close" type="button" onclick="closeModal()">×</button>
+        </div>
+
+        <div class="notice-card">
+            <strong>Note:</strong> Sessions must be booked at least 30 minutes in advance.
+        </div>
+
+        <form id="supportForm" action="{{ url_for('book') }}" method="POST" enctype="multipart/form-data">
+    
+            <div class="form-field">
+                <label for="description">Describe Your Issue</label>
+                <textarea id="description" name="description" required oninput="validateForm()"></textarea>
+            </div>
+
+            <div class="grid-two">
+                <div class="form-field">
+                    <label for="schedulePicker">Preferred Date & Time</label>
+                    <input id="schedulePicker" type="datetime-local" name="scheduled_time" required onchange="validateForm()">
+                </div>
+                <div class="form-field">
+                    <label for="screenshot">Upload Screenshot (optional)</label>
+                    <input id="screenshot" class="input-file" type="file" name="screenshot" accept="image/*" onchange="validateForm()">
+                    <span class="small-text" id="screenshotNote"></span>
+                </div>
+            </div>
+
+            <div class="card-actions" style="justify-content: flex-end; margin-top: 10px;">
+                <button class="button button-secondary" type="button" onclick="closeModal(true)">Cancel</button>
+                <button class="button button-primary" type="submit" id="submitBtn" disabled>Save & Continue</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openModal() {
+        const now = new Date();
+        const futureLimit = new Date(now.getTime() + 35 * 60 * 1000);
+        const year = futureLimit.getFullYear();
+        const month = String(futureLimit.getMonth() + 1).padStart(2, '0');
+        const day = String(futureLimit.getDate()).padStart(2, '0');
+        const hours = String(futureLimit.getHours()).padStart(2, '0');
+        const minutes = String(futureLimit.getMinutes()).padStart(2, '0');
+        const minDateTimeString = `${year}-${month}-${day}T${hours}:${minutes}`;
+
+        const picker = document.getElementById('schedulePicker');
+        if (picker) {
+            picker.min = minDateTimeString;
+            picker.value = minDateTimeString;
+        }
+
+        const modal = document.getElementById('bookingModal');
+        if (modal) modal.classList.add('open');
+    }
+
+    function closeModal(clearStorage = false) {
+        const modal = document.getElementById('bookingModal');
+        if (modal) modal.classList.remove('open');
+        if (clearStorage) {
+            clearBookingStorage();
+        }
+    }
+
+    function validateForm() {
+        const form = document.getElementById('supportForm');
+        const submitBtn = document.getElementById('submitBtn');
+        if (form && submitBtn) {
+            submitBtn.disabled = !form.checkValidity();
+        }
+    }
+
+    function saveBookingToStorage() {
+        const form = document.getElementById('supportForm');
+        const formData = new FormData(form);
+        const fields = ['description', 'scheduled_time'];
+
+        fields.forEach(function (field) {
+            const value = formData.get(field);
+            if (value) {
+                sessionStorage.setItem(field, value);
+            }
+        });
+
+        const screenshotFile = document.getElementById('screenshot').files[0];
+        if (screenshotFile) {
+            sessionStorage.setItem('screenshotName', screenshotFile.name);
+        } else {
+            sessionStorage.removeItem('screenshotName');
+        }
+
+        sessionStorage.setItem('pendingBooking', 'true');
+    }
+
+    function clearBookingStorage() {
+        ['name', 'whatsapp', 'email', 'license_no', 'description', 'scheduled_time', 'screenshotName', 'pendingBooking'].forEach(function (key) {
+            sessionStorage.removeItem(key);
+        });
+    }
+
+    function fillBookingFormFromStorage() {
+        const fields = ['description', 'scheduled_time'];
+        let found = false;
+        fields.forEach(function (field) {
+            const value = sessionStorage.getItem(field);
+            if (value) {
+                const element = document.getElementById(field === 'scheduled_time' ? 'schedulePicker' : field);
+                if (element) {
+                    element.value = value;
+                    found = true;
+                }
+            }
+        });
+
+        const note = document.getElementById('screenshotNote');
+        if (note) {
+            const screenshotName = sessionStorage.getItem('screenshotName');
+            note.textContent = screenshotName ? 'Screenshot needs to be reattached after login.' : '';
+        }
+
+        validateForm();
+        return found;
+    }
+
+    function handleBookingSubmit(event) {
+        const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
+        if (!isAuthenticated) {
+            event.preventDefault();
+            saveBookingToStorage();
+            closeModal();
+            window.location.href = '{{ url_for('login') }}?next={{ url_for('index') }}';
+        } else {
+            clearBookingStorage();
+            closeModal();
+        }
+    }
+
+    const bookingForm = document.getElementById('supportForm');
+    if (bookingForm) {
+        bookingForm.addEventListener('submit', handleBookingSubmit);
+    }
+
+    function restoreBookingAfterLogin() {
+        const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
+        const pendingBooking = sessionStorage.getItem('pendingBooking');
+
+        if (isAuthenticated && pendingBooking === 'true') {
+            if (fillBookingFormFromStorage()) {
+                openModal();
+            }
+        }
+    }
+
+    restoreBookingAfterLogin();
+</script>
+{% endblock %}

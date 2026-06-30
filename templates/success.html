@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+{% block title %}Booking Success | Tech Support App{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width: 700px; margin: 0 auto;">
+    <div class="row-center" style="justify-content: space-between; align-items: flex-start; gap: 18px;">
+        <div>
+            <p class="small-text">Booking confirmed</p>
+            <h1 class="section-title">Payment Successful!</h1>
+        </div>
+        <span class="badge badge-paid">Confirmed</span>
+    </div>
+
+    <div class="section-card">
+        <div class="grid-two">
+            <div>
+                <p><strong>Receipt ID</strong></p>
+                <p class="small-text">REC-{{ booking.id }}001</p>
+            </div>
+            <div>
+                <p><strong>Amount Paid</strong></p>
+                <p class="small-text">₹500.00 (INR)</p>
+            </div>
+        </div>
+
+        <div class="grid-two" style="margin-top: 22px;">
+            <div>
+                <p><strong>Customer</strong></p>
+                <p class="small-text">{{ booking.name }}</p>
+            </div>
+            <div>
+                <p><strong>WhatsApp</strong></p>
+                <p class="small-text">{{ booking.whatsapp }}</p>
+            </div>
+        </div>
+
+        <div style="margin-top: 22px;">
+            <p><strong>Scheduled Slot</strong></p>
+            <p id="target-slot" class="small-text">{{ booking.scheduled_time }}</p>
+        </div>
+    </div>
+
+    <div class="notice-card" id="standard-info" style="margin-top: 22px;">
+        <p>ℹ️ Your technician is preparing the connection. The remote support session will become available at your scheduled slot.</p>
+    </div>
+
+    <div class="notice-card" id="late-info" style="margin-top: 22px; display: none; background: #fef2f2; color: #991b1b; border-color: #fecaca;">
+        <p>⚠️ Your session window has passed. If the session cannot be completed, a refund will be issued within 48 hours.</p>
+    </div>
+
+    <div class="countdown-container" id="timer-container" style="margin-top: 22px;">
+        <span class="small-text">Time remaining until technician connects</span>
+        <div id="countdown-timer">Calculating...</div>
+    </div>
+
+    <div class="section-card" style="margin-top: 24px; text-align: center;">
+        {% if booking.remote_link and booking.remote_link.startswith('http') %}
+            <a class="button button-primary" href="{{ booking.remote_link }}" target="_blank" rel="noopener noreferrer" style="width: 100%;">🚀 Join Session Now</a>
+        {% else %}
+            <div class="badge badge-pending" style="width: 100%; display: inline-flex; justify-content: center; padding: 18px 16px;">⏳ Remote link is being generated. Refresh in a few moments.</div>
+        {% endif %}
+    </div>
+
+    <div style="text-align: center; margin-top: 24px;">
+        <a href="{{ url_for('index') }}">← Back to Dashboard</a>
+    </div>
+</section>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const targetText = document.getElementById('target-slot').innerText.trim();
+        if (!targetText) return;
+
+        const targetDate = new Date(targetText);
+        const timerDisplay = document.getElementById('countdown-timer');
+        const standardInfo = document.getElementById('standard-info');
+        const lateInfo = document.getElementById('late-info');
+        const timerContainer = document.getElementById('timer-container');
+
+        function updateTimer() {
+            const now = new Date();
+            const difference = targetDate - now;
+
+            if (difference < -14 * 60 * 1000) {
+                standardInfo.style.display = 'none';
+                timerContainer.style.display = 'none';
+                lateInfo.style.display = 'block';
+                return clearInterval(intervalId);
+            }
+
+            if (difference <= 0) {
+                timerDisplay.innerText = '00h 00m 00s';
+                timerDisplay.classList.add('timer-complete');
+                return;
+            }
+
+            const hours = Math.floor(difference / (1000 * 60 * 60));
+            const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+            timerDisplay.innerText = `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+        }
+
+        updateTimer();
+        const intervalId = setInterval(updateTimer, 1000);
+    });
+</script>
+{% endblock %}
