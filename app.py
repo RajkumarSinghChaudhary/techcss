@@ -1,60 +1,57 @@
 import os
 import requests
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, send_from_directory
-from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 import razorpay
 
-# Establish absolute base directory pathing for SQLite persistence stability on cloud platforms
-basedir = os.path.abspath(os.path.dirname(__file__))
+# Cloudinary & Firebase SDK Imports
+import cloudinary
+import cloudinary.uploader
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'super-secret-key-change-this-in-production'
-app.config['UPLOAD_FOLDER'] = os.path.join(basedir, 'uploads')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'database.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# --- ☁️ Cloudinary Configuration ---
+# Configuration       
+cloudinary.config( 
+    cloud_name = "hc1ekqow", 
+    api_key = "162334798191534", 
+    api_secret = "<your_api_secret>", # Click 'View API Keys' above to copy your API secret
+    secure=True
+)
 
-db = SQLAlchemy(app)
+# --- 🔥 Firebase Firestore Setup ---
+# Place your 'serviceAccountKey.json' file in your project root directory.
+# In Production on Render, it is safer to read these values from environment variables.
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
-# --- Flask-Login Setup ---
+# --- Flask-Login Setup with User Class Wrapper ---
 login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
 
+class User(UserMixin):
+    def __init__(self, user_id, data):
+        self.id = user_id
+        self.name = data.get('name')
+        self.whatsapp = data.get('whatsapp')
+        self.license_no = data.get('license_no')
+        self.email = data.get('email')
+        self.password = data.get('password')
+        self.is_admin = data.get('is_admin', False)
+
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
-
-# --- Database Models ---
-
-class User(UserMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    whatsapp = db.Column(db.String(20), nullable=False)
-    license_no = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
-    bookings = db.relationship('Booking', backref='customer', lazy=True)
-
-class Booking(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    name = db.Column(db.String(100), nullable=False)
-    whatsapp = db.Column(db.String(20), nullable=False)
-    email = db.Column(db.String(100), nullable=False)
-    license_no = db.Column(db.String(50), nullable=False)
-    description = db.Column(db.Text, nullable=False)
-    scheduled_time = db.Column(db.String(50), nullable=False)
-    screenshot_path = db.Column(db.String(200))
-    payment_status = db.Column(db.String(20), default="Pending")
-    razorpay_order_id = db.Column(db.String(100))
-    remote_link = db.Column(db.String(200))        # Auto-generated Customer Join Link
-    admin_remote_link = db.Column(db.String(200))  # Auto-generated Technician Console Link
+    user_ref = db.collection('users').document(str(user_id)).get()
+    if user_ref.exists:
+        return User(user_ref.id, user_ref.to_dict())
+    return None
 
 # --- Third-Party Credentials Setup ---
 RAZORPAY_KEY_ID = "rzp_test_T7dA8Pf6P3SNpQ"
@@ -69,7 +66,7 @@ ZOHO_REFRESH_TOKEN = "1000.16d094a6501b51282399761df1a9405d.a165a740053e0ad20e84
 # --- Helper: Dynamic Zoho Access Token Generator ---
 def get_zoho_access_token():
     """Exchanges your long-lived Refresh Token for a temporary live Access Token via Zoho India."""
-    url = "https://accounts.zoho.in/oauth/v2/token"  # 🌍 Kept as .in
+    url = "https://accounts.zoho.in/oauth/v2/token"
     params = {
         "refresh_token": ZOHO_REFRESH_TOKEN,
         "client_id": ZOHO_CLIENT_ID,
@@ -95,15 +92,24 @@ def register():
         whatsapp = request.form.get('whatsapp')
         license_no = request.form.get('license_no')
         
-        user_exists = User.query.filter_by(email=email).first()
-        if user_exists:
+        # Query Firebase Firestore to see if user exists
+        users_ref = db.collection('users').where('email', '==', email).limit(1).get()
+        if len(users_ref) > 0:
             flash('Email already registered!', 'error')
             return redirect(url_for('register', next=next_page))
             
         hashed_password = generate_password_hash(password, method='scrypt')
-        new_user = User(email=email, password=hashed_password, name=name, whatsapp=whatsapp, license_no=license_no)
-        db.session.add(new_user)
-        db.session.commit()
+        
+        # Auto-generate auto-incrementing-like string IDs or native Firestore IDs
+        new_user_ref = db.collection('users').document() 
+        new_user_ref.set({
+            "name": name,
+            "whatsapp": whatsapp,
+            "license_no": license_no,
+            "email": email,
+            "password": hashed_password,
+            "is_admin": False
+        })
         
         flash('Account created successfully! Please log in.', 'success')
         if next_page:
@@ -118,12 +124,16 @@ def login():
         email = request.form.get('email')
         password = request.form.get('password')
         
-        user = User.query.filter_by(email=email).first()
-        if user and check_password_hash(user.password, password):
-            login_user(user)
-            return redirect(next_page or url_for('index'))
-        else:
-            flash('Invalid login credentials!', 'error')
+        users_ref = db.collection('users').where('email', '==', email).limit(1).get()
+        if len(users_ref) > 0:
+            user_doc = users_ref[0]
+            user_data = user_doc.to_dict()
+            if check_password_hash(user_data.get('password'), password):
+                user_obj = User(user_doc.id, user_data)
+                login_user(user_obj)
+                return redirect(next_page or url_for('index'))
+        
+        flash('Invalid login credentials!', 'error')
     return render_template('login.html', next=next_page)
 
 @app.route('/logout')
@@ -137,7 +147,13 @@ def logout():
 @app.route('/')
 def index():
     if current_user.is_authenticated:
-        user_bookings = Booking.query.filter_by(user_id=current_user.id).all()
+        # Fetch only bookings belonging to the current logged in user
+        bookings_snapshots = db.collection('bookings').where('user_id', '==', current_user.id).get()
+        user_bookings = []
+        for doc in bookings_snapshots:
+            b_data = doc.to_dict()
+            b_data['id'] = doc.id  # Append document id so frontend templates render links perfectly
+            user_bookings.append(b_data)
         return render_template('index.html', name=current_user.email, bookings=user_bookings)
 
     return render_template('index.html', name=None, bookings=[])
@@ -145,15 +161,10 @@ def index():
 @app.route('/book', methods=['POST'], strict_slashes=False)
 @login_required
 def book():
-    scheduled_time_str = request.form.get('scheduled_time') # Format coming in: 'YYYY-MM-DDTHH:MM'
-    
-    # Parse the user's chosen time string into a Python datetime object
+    scheduled_time_str = request.form.get('scheduled_time')
     chosen_time = datetime.strptime(scheduled_time_str, '%Y-%m-%dT%H:%M')
-    
-    # Calculate what 30 minutes from right now looks like
     minimum_allowed_time = datetime.now() + timedelta(minutes=29)
     
-    # Backend Guard Gate Check
     if chosen_time < minimum_allowed_time:
         flash('Booking Error: Support slots must be scheduled at least 30 minutes in advance!', 'error')
         return redirect(url_for('index'))
@@ -162,10 +173,16 @@ def book():
     scheduled_time = request.form.get('scheduled_time')
     
     file = request.files.get('screenshot')
-    screenshot_path = None
-    if file:
-        filename = f"{current_user.whatsapp}_{file.filename}"
-        screenshot_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    screenshot_url = None
+    
+    # Direct Cloudinary Streaming - Wires directly to external server without saving local files
+    if file and file.filename != '':
+        try:
+            upload_result = cloudinary.uploader.upload(file, folder="tickets/")
+            screenshot_url = upload_result.get("secure_url")
+        except Exception as e:
+            print(f"Cloudinary upload failed: {e}")
+            screenshot_url = None
 
     order_data = {'amount': 50000, 'currency': 'INR', 'payment_capture': 1}
     try:
@@ -174,88 +191,96 @@ def book():
         flash('Unable to connect to the payment gateway. Please try again in a moment.', 'error')
         return redirect(url_for('index'))
 
-    if file:
-        try:
-            file.save(screenshot_path)
-        except Exception:
-            screenshot_path = None
-
-    new_booking = Booking(
-        user_id=current_user.id,
-        name=current_user.name,
-        whatsapp=current_user.whatsapp,
-        email=current_user.email,
-        license_no=current_user.license_no,
-        description=description,
-        scheduled_time=scheduled_time,
-        screenshot_path=screenshot_path,
-        razorpay_order_id=order['id']
-    )
-    db.session.add(new_booking)
-    db.session.commit()
+    # Save tracking payload details into Cloud Firestore
+    booking_data = {
+        "user_id": current_user.id,
+        "name": current_user.name,
+        "whatsapp": current_user.whatsapp,
+        "email": current_user.email,
+        "license_no": current_user.license_no,
+        "description": description,
+        "scheduled_time": scheduled_time,
+        "screenshot_path": screenshot_url, # Key name remains identical to keep HTML templates working
+        "payment_status": "Pending",
+        "razorpay_order_id": order['id'],
+        "remote_link": None,
+        "admin_remote_link": None,
+        "created_at": firestore.SERVER_TIMESTAMP
+    }
+    db.collection('bookings').add(booking_data)
 
     flash('Ticket created successfully! Please complete payment from your dashboard.', 'success')
     return redirect(url_for('index'))
 
-@app.route('/checkout/<int:booking_id>')
+@app.route('/checkout/<string:booking_id>')
 @login_required
 def checkout(booking_id):
-    booking = Booking.query.filter_by(id=booking_id, user_id=current_user.id).first_or_404()
-    if booking.payment_status == "Paid":
+    booking_ref = db.collection('bookings').document(booking_id).get()
+    if not booking_ref.exists:
+        return "Not Found", 404
+        
+    booking_data = booking_ref.to_dict()
+    if booking_data.get('user_id') != current_user.id:
+        return "Unauthorized", 401
+        
+    if booking_data.get('payment_status') == "Paid":
         flash('This ticket is already paid!', 'info')
         return redirect(url_for('index'))
         
-    order = {'id': booking.razorpay_order_id, 'amount': 50000}
-    return render_template('payment.html', order=order, key_id=RAZORPAY_KEY_ID, booking_id=booking.id)
+    order = {'id': booking_data.get('razorpay_order_id'), 'amount': 50000}
+    return render_template('payment.html', order=order, key_id=RAZORPAY_KEY_ID, booking_id=booking_ref.id)
 
-# --- 🚀 AUTOMATED ROUTE: GENERATES ZOHO SESSIONS UPON SUCCESSFUL PAYMENT ---
+# --- AUTOMATED ROUTE: GENERATES ZOHO SESSIONS UPON SUCCESSFUL PAYMENT ---
 @app.route('/payment-success', methods=['POST'])
 @login_required
 def payment_success():
     data = request.json
     booking_id = data.get('booking_id')
-    booking = Booking.query.get(booking_id)
     
-    if booking and booking.user_id == current_user.id:
-        booking.payment_status = "Paid"
-        
-        # 1. Fetch a fresh live Access Token dynamically via our Refresh Token
-        zoho_token = get_zoho_access_token()
-        
-        if zoho_token:
-            # 2. Call Zoho Assist India API to provision a new remote support session
-            zoho_api_url = "https://assist.zoho.in/api/v2/session"  # 🌍 Kept as .in
-            headers = {
-                "Authorization": f"Zoho-oauthtoken {zoho_token}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "customer_email": booking.email,
-                "type": "rs"  # 'rs' represents Remote Support Session
-            }
+    booking_ref = db.collection('bookings').document(str(booking_id))
+    booking_snap = booking_ref.get()
+    
+    if booking_snap.exists:
+        booking_data = booking_snap.to_dict()
+        if booking_data.get('user_id') == current_user.id:
+            updated_payload = {"payment_status": "Paid"}
             
-            try:
-                zoho_response = requests.post(zoho_api_url, headers=headers, json=payload).json()
+            zoho_token = get_zoho_access_token()
+            if zoho_token:
+                zoho_api_url = "https://assist.zoho.in/api/v2/session"
+                headers = {
+                    "Authorization": f"Zoho-oauthtoken {zoho_token}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "customer_email": booking_data.get('email'),
+                    "type": "rs"
+                }
                 
-                # 3. Safely extract customer and technician control URLs from Zoho response
-                representation = zoho_response.get("representation", {})
-                
-                booking.remote_link = representation.get("customer_url")
-                booking.admin_remote_link = representation.get("technician_url")
-                
-            except Exception as e:
-                print(f"Failed to communicate with Zoho Assist API endpoint: {e}")
-                
-        db.session.commit()
-        return jsonify({"status": "success", "redirect": url_for('success', booking_id=booking.id)})
+                try:
+                    zoho_response = requests.post(zoho_api_url, headers=headers, json=payload).json()
+                    representation = zoho_response.get("representation", {})
+                    
+                    updated_payload["remote_link"] = representation.get("customer_url")
+                    updated_payload["admin_remote_link"] = representation.get("technician_url")
+                    
+                except Exception as e:
+                    print(f"Failed to communicate with Zoho Assist API endpoint: {e}")
+                    
+            booking_ref.update(updated_payload)
+            return jsonify({"status": "success", "redirect": url_for('success', booking_id=booking_ref.id)})
     
     return jsonify({"status": "failed"}), 400
 
-@app.route('/success/<int:booking_id>')
+@app.route('/success/<string:booking_id>')
 @login_required
 def success(booking_id):
-    booking = Booking.query.filter_by(id=booking_id, user_id=current_user.id).first_or_404()
-    return render_template('success.html', booking=booking)
+    booking_ref = db.collection('bookings').document(booking_id).get()
+    if not booking_ref.exists:
+        return "Not Found", 404
+    booking_data = booking_ref.to_dict()
+    booking_data['id'] = booking_ref.id
+    return render_template('success.html', booking=booking_data)
 
 # --- Admin Panel Routes ---
 
@@ -266,17 +291,74 @@ def admin_dashboard():
         flash('Access Denied: Admin privileges required.', 'error')
         return redirect(url_for('index'))
     
-    all_bookings = Booking.query.order_by(Booking.id.desc()).all()
+    # Fetch all tickets sorted by creation date descending
+    all_bookings_snap = db.collection('bookings').order_by('created_at', direction=firestore.Query.DESCENDING).get()
+    all_bookings = []
+    for doc in all_bookings_snap:
+        b_data = doc.to_dict()
+        b_data['id'] = doc.id
+        all_bookings.append(b_data)
+        
     return render_template('admin.html', bookings=all_bookings)
 
+# Deprecated route as assets are now directly sourced from Cloudinary's global secure URLs
 @app.route('/uploads/<filename>')
 @login_required
 def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return "Moved to Cloudinary", 410
 
-# Ensure database context initialization handles app-level scopes reliably on runtime boot
-with app.app_context():
-    db.create_all()
+# --- 🚀 NEW: ASYNC PRE-LOGIN SCREENSHOT UPLOADER ---
+@app.route('/upload-temp-screenshot', methods=['POST'])
+def upload_temp_screenshot():
+    file = request.files.get('file')
+    if file:
+        try:
+            upload_result = cloudinary.uploader.upload(file, folder="tickets/")
+            return jsonify({"secure_url": upload_result.get("secure_url")})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "No file supplied"}), 400
+
+
+# --- 🚀 NEW: AUTO-PILOT BOOKING ROUTE FOR POST-LOGIN PROCESSING ---
+@app.route('/book-async', methods=['POST'])
+@login_required
+def book_async():
+    data = request.json or {}
+    description = data.get('description')
+    scheduled_time = data.get('scheduled_time')
+    screenshot_url = data.get('screenshot_url') # Directly receives the pre-saved Cloudinary URL
+
+    # Safety Guard Gate Check (Mirroring standard /book constraint criteria)
+    chosen_time = datetime.strptime(scheduled_time, '%Y-%m-%dT%H:%M')
+    if chosen_time < (datetime.now() + timedelta(minutes=29)):
+        return jsonify({"status": "error", "message": "Support slots must be scheduled 30 minutes in advance"}), 400
+
+    order_data = {'amount': 50000, 'currency': 'INR', 'payment_capture': 1}
+    try:
+        order = client.order.create(data=order_data)
+    except Exception:
+        return jsonify({"status": "error", "message": "Payment gateway communication error"}), 500
+
+    booking_data = {
+        "user_id": current_user.id,
+        "name": current_user.name,
+        "whatsapp": current_user.whatsapp,
+        "email": current_user.email,
+        "license_no": current_user.license_no,
+        "description": description,
+        "scheduled_time": scheduled_time,
+        "screenshot_path": screenshot_url, # Saves instantly with zero data data drop-off
+        "payment_status": "Pending",
+        "razorpay_order_id": order['id'],
+        "remote_link": None,
+        "admin_remote_link": None,
+        "created_at": firestore.SERVER_TIMESTAMP
+    }
+    db.collection('bookings').add(booking_data)
+    
+    flash('Ticket created automatically from your saved slot! Please complete your payment.', 'success')
+    return jsonify({"status": "success"})
 
 if __name__ == '__main__':
     app.run(debug=True)
