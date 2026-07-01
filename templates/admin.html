@@ -1,4 +1,4 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
 {% block title %}Admin Panel | Tech Support App{% endblock %}
 
 {% block content %}
@@ -26,7 +26,7 @@
                 <tbody>
                     {% for booking in bookings %}
                         <tr>
-                            <td>#{{ booking.id }}</td>
+                            <td>#{{ booking.id[:8] }}</td> 
                             <td>
                                 <strong>{{ booking.name }}</strong><br>
                                 <span class="small-text">{{ booking.whatsapp }}</span><br>
@@ -36,7 +36,7 @@
                             <td>
                                 <p style="margin: 0 0 10px 0;">{{ booking.description[:120] }}{% if booking.description|length > 120 %}...{% endif %}</p>
                                 {% if booking.screenshot_path %}
-                                    <a class="action-link action-link-muted" href="{{ url_for('uploaded_file', filename=booking.screenshot_path.split('\\')[-1].split('/')[-1]) }}" target="_blank">View Screenshot</a>
+                                    <a class="action-link action-link-muted" href="{{ booking.screenshot_path }}" target="_blank">View Screenshot</a>
                                 {% else %}
                                     <span class="small-text">No screenshot provided</span>
                                 {% endif %}
@@ -51,7 +51,9 @@
                             <td>
                                 {% if booking.payment_status == 'Paid' and booking.admin_remote_link %}
                                     <div class="remote-access-block">
-                                        <a class="action-link connect-remote-button action-link-disabled" id="connect-btn-{{ booking.id }}"
+                                        <a class="action-link connect-remote-button action-link-disabled" 
+                                           id="connect-btn-{{ booking.id }}"
+                                           data-booking-id="{{ booking.id }}"
                                            data-scheduled-time="{{ booking.scheduled_time }}"
                                            data-admin-link="{{ booking.admin_remote_link }}"
                                            aria-disabled="true">Connect Remote PC</a>
@@ -93,7 +95,8 @@
         document.querySelectorAll('.connect-remote-button').forEach(function (button) {
             var scheduledTime = button.dataset.scheduledTime;
             var adminLink = button.dataset.adminLink;
-            var bookingId = button.id.replace('connect-btn-', '');
+            // Pulls string-safe key identifiers securely from the data object scope
+            var bookingId = button.dataset.bookingId;
             var lockInfo = document.getElementById('lock-info-' + bookingId);
 
             function updateLockState() {
@@ -130,5 +133,4 @@
         });
     });
 </script>
-
 {% endblock %}
