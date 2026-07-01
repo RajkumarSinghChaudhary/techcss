@@ -27,8 +27,8 @@
                     {% if bookings %}
                         {% for booking in bookings %}
                             <tr>
-                                <td>#{{ booking.id }}</td>
-                                <td>{{ booking.scheduled_time }}</td>
+                                <td>#{{ booking.id[:8] }}</td>
+                                <td>{{ booking.scheduled_time.replace('T', ' ') }}</td>
                                 <td>{{ booking.description[:70] }}{% if booking.description|length > 70 %}...{% endif %}</td>
                                 <td>
                                     {% if booking.payment_status == 'Paid' %}
@@ -135,68 +135,103 @@
         }
     }
 
-    function saveBookingToStorage() {
-        const form = document.getElementById('supportForm');
-        const formData = new FormData(form);
-        const fields = ['description', 'scheduled_time'];
+    // New API-driven handler to upload image to Cloudinary BEFORE sending user to login
+    async function uploadScreenshotToCloudinary(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'ml_default'); // Default unsigned preset for raw uploads
 
-        fields.forEach(function (field) {
-            const value = formData.get(field);
-            if (value) {
-                sessionStorage.setItem(field, value);
-            }
-        });
-
-        const screenshotFile = document.getElementById('screenshot').files[0];
-        if (screenshotFile) {
-            sessionStorage.setItem('screenshotName', screenshotFile.name);
-        } else {
-            sessionStorage.removeItem('screenshotName');
+        try {
+            // We pass the file through a dedicated unsigned endpoint or your local shadow api
+            // For complete seamless operation, we will upload it via a quick backend helper route
+            const response = await fetch('/upload-temp-screenshot', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            return data.secure_url || null;
+        } catch (e) {
+            console.error("Pre-login screenshot storage failed:", e);
+            return null;
         }
+    }
 
-        sessionStorage.setItem('pendingBooking', 'true');
+    async function handleBookingSubmit(event) {
+        event.preventDefault(); // Pause standard submit chain
+        const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
+        const submitBtn = document.getElementById('submitBtn');
+        
+        if (!isAuthenticated) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Saving details securely...";
+
+            const form = document.getElementById('supportForm');
+            const description = document.getElementById('description').value;
+            const scheduledTime = document.getElementById('schedulePicker').value;
+            const fileInput = document.getElementById('screenshot').files[0];
+
+            sessionStorage.setItem('description', description);
+            sessionStorage.setItem('scheduled_time', scheduledTime);
+            sessionStorage.setItem('pendingBooking', 'true');
+
+            // Secure the file immediately to the cloud if it exists
+            if (fileInput) {
+                submitBtn.textContent = "Uploading screenshot...";
+                const cloudUrl = await uploadScreenshotToCloudinary(fileInput);
+                if (cloudUrl) {
+                    sessionStorage.setItem('screenshotCloudUrl', cloudUrl);
+                }
+            }
+
+            // Route cleanly to login, maintaining target return redirection
+            window.location.href = '{{ url_for("login") }}?next={{ url_for("index") }}';
+        } else {
+            // If already logged in, let standard browser submit pass straight through
+            clearBookingStorage();
+            document.getElementById('supportForm').submit();
+        }
     }
 
     function clearBookingStorage() {
-        ['name', 'whatsapp', 'email', 'license_no', 'description', 'scheduled_time', 'screenshotName', 'pendingBooking'].forEach(function (key) {
+        ['description', 'scheduled_time', 'screenshotCloudUrl', 'pendingBooking'].forEach(function (key) {
             sessionStorage.removeItem(key);
         });
     }
 
-    function fillBookingFormFromStorage() {
-        const fields = ['description', 'scheduled_time'];
-        let found = false;
-        fields.forEach(function (field) {
-            const value = sessionStorage.getItem(field);
-            if (value) {
-                const element = document.getElementById(field === 'scheduled_time' ? 'schedulePicker' : field);
-                if (element) {
-                    element.value = value;
-                    found = true;
+    // Automated Execution Core: Processes the background submission instantly upon authentication redirect
+    async function checkAndAutoSubmitBooking() {
+        const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
+        const pendingBooking = sessionStorage.getItem('pendingBooking');
+
+        if (isAuthenticated && pendingBooking === 'true') {
+            const description = sessionStorage.getItem('description');
+            const scheduled_time = sessionStorage.getItem('scheduled_time');
+            const screenshotCloudUrl = sessionStorage.getItem('screenshotCloudUrl');
+
+            if (description && scheduled_time) {
+                // Build a quiet JSON payload and submit behind the scenes
+                const payload = {
+                    description: description,
+                    scheduled_time: scheduled_time,
+                    screenshot_url: screenshotCloudUrl
+                };
+
+                try {
+                    const response = await fetch('/book-async', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (response.ok) {
+                        clearBookingStorage();
+                        // Refresh the dashboard immediately to display their newly generated tracking entry
+                        window.location.reload(); 
+                    }
+                } catch (error) {
+                    console.error("Auto-booking workflow processing error:", error);
                 }
             }
-        });
-
-        const note = document.getElementById('screenshotNote');
-        if (note) {
-            const screenshotName = sessionStorage.getItem('screenshotName');
-            note.textContent = screenshotName ? 'Screenshot needs to be reattached after login.' : '';
-        }
-
-        validateForm();
-        return found;
-    }
-
-    function handleBookingSubmit(event) {
-        const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
-        if (!isAuthenticated) {
-            event.preventDefault();
-            saveBookingToStorage();
-            closeModal();
-            window.location.href = '{{ url_for('login') }}?next={{ url_for('index') }}';
-        } else {
-            clearBookingStorage();
-            closeModal();
         }
     }
 
@@ -205,17 +240,7 @@
         bookingForm.addEventListener('submit', handleBookingSubmit);
     }
 
-    function restoreBookingAfterLogin() {
-        const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
-        const pendingBooking = sessionStorage.getItem('pendingBooking');
-
-        if (isAuthenticated && pendingBooking === 'true') {
-            if (fillBookingFormFromStorage()) {
-                openModal();
-            }
-        }
-    }
-
-    restoreBookingAfterLogin();
+    // Run verification immediately on page layout execution boot
+    document.addEventListener('DOMContentLoaded', checkAndAutoSubmitBooking);
 </script>
 {% endblock %}
